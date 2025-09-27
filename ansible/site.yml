@@ -1,31 +1,69 @@
+---
 - hosts: yum-server
   become: true
   vars:
+    # Artifacts (passed from Jenkins)
     flask_artifact: ""
     node_artifact: ""
+
+    # Database configuration
     db_host: "localhost"
     db_port: 5432
     db_name: "mydb"
     db_user: "myuser"
     db_password: "mypassword123"
+
+    # ADD THESE MISSING PORT VARIABLES:
+    flask_port: 5000
+    node_port: 3000
+
+    # Application settings
+    app_directory: "/opt/apps"
+    flask_workers: 2
+    node_instances: 2
+
+  pre_tasks:
+  # Create application directories before roles run
+  - name: Create application directories
+    file:
+      path: "{{ item }}"
+      state: directory
+      owner: ec2-user
+      group: ec2-user
+      mode: '0755'
+    loop:
+    - /opt/apps
+    - /opt/flask_app
+    - /opt/node_app
+
+  - name: Install PM2 globally (before nodejs role)
+    npm:
+      name: pm2
+      global: true
+      state: present
+
   roles:
-  - flask
-  - nodejs
-  - postgres
+  - postgres # Sets up PostgreSQL database
+  - flask # Handles Flask deployment (if flask_artifact provided)
+  - nodejs # Handles Node.js deployment (if node_artifact provided)
 
   tasks:
-  # ------------------ Flask App ------------------
+  # ------------------ Flask App Deployment ------------------
   - name: Copy Flask artifact to server
     copy:
       src: "{{ flask_artifact }}"
-      dest: /opt/apps/
+      dest: "{{ app_directory }}/"
+      owner: ec2-user
+      group: ec2-user
     when: flask_artifact != ""
 
   - name: Extract Flask app
     unarchive:
-      src: "/opt/apps/{{ flask_artifact | basename }}"
+      src: "{{ app_directory }}/{{ flask_artifact | basename }}"
       dest: /opt/flask_app
-      remote_src: yes
+      remote_src: true
+      owner: ec2-user
+      group: ec2-user
     when: flask_artifact != ""
 
   - name: Create Flask .env file
@@ -37,6 +75,20 @@
         DATABASE_NAME={{ db_name }}
         DATABASE_USER={{ db_user }}
         DATABASE_PASSWORD={{ db_password }}
+        FLASK_PORT={{ flask_port }}
+      owner: ec2-user
+      group: ec2-user
+      mode: '0600'
+    when: flask_artifact != ""
+
+  - name: Install Flask dependencies
+    pip:
+      name:
+      - flask
+      - gunicorn
+      - psycopg2-binary
+      - python-dotenv
+      executable: pip3
     when: flask_artifact != ""
 
   - name: Create systemd service for Flask app
@@ -45,71 +97,164 @@
       content: |
         [Unit]
         Description=Flask Application
-        After=network.target
+        After=network.target postgresql.service
+        Wants=postgresql.service
 
         [Service]
-        WorkingDirectory=/opt/flask_app
-        ExecStart=/usr/bin/python3 /opt/flask_app/app.py
-        EnvironmentFile=/opt/flask_app/.env
-        Restart=always
+        Type=simple
         User=ec2-user
+        WorkingDirectory=/opt/flask_app
+        Environment=PATH=/usr/local/bin:/usr/bin:/bin
+        EnvironmentFile=/opt/flask_app/.env
+        ExecStart=/usr/bin/python3 -m gunicorn --workers {{ flask_workers }} --bind 0.0.0.0:{{ flask_port }} app:app
+        Restart=always
+        RestartSec=10
 
         [Install]
         WantedBy=multi-user.target
     when: flask_artifact != ""
 
-  - name: Reload systemd
-    command: systemctl daemon-reexec
+  - name: Reload systemd for Flask
+    systemd:
+      daemon_reload: true
     when: flask_artifact != ""
 
   - name: Enable and start Flask app
     systemd:
       name: flask_app
       state: started
-      enabled: yes
+      enabled: true
     when: flask_artifact != ""
 
-  # ------------------ Node.js App ------------------
-  - name: Install PM2 globally
-    npm:
-      name: pm2
-      global: yes
-      state: present
-
+  # ------------------ Node.js App Deployment ------------------
   - name: Copy Node.js artifact to server
     copy:
       src: "{{ node_artifact }}"
-      dest: /opt/apps/
+      dest: "{{ app_directory }}/"
+      owner: ec2-user
+      group: ec2-user
     when: node_artifact != ""
 
   - name: Extract Node.js app
     unarchive:
-      src: "/opt/apps/{{ node_artifact | basename }}"
+      src: "{{ app_directory }}/{{ node_artifact | basename }}"
       dest: /opt/node_app
-      remote_src: yes
+      remote_src: true
+      owner: ec2-user
+      group: ec2-user
+    when: node_artifact != ""
+
+  - name: Install Node.js dependencies
+    npm:
+      path: /opt/node_app
+    become_user: ec2-user
     when: node_artifact != ""
 
   - name: Create Node.js .env file
     copy:
       dest: /opt/node_app/.env
       content: |
+        NODE_ENV=production
+        PORT={{ node_port }}
         DATABASE_HOST={{ db_host }}
         DATABASE_PORT={{ db_port }}
         DATABASE_NAME={{ db_name }}
         DATABASE_USER={{ db_user }}
         DATABASE_PASSWORD={{ db_password }}
+      owner: ec2-user
+      group: ec2-user
+      mode: '0600'
     when: node_artifact != ""
 
-  - name: Start Node.js app with PM2
-    command: pm2 start /opt/node_app/app.js --name node_app --update-env
+  - name: Stop existing PM2 processes
+    command: pm2 delete all
+    become_user: ec2-user
+    ignore_errors: true
+    when: node_artifact != ""
+
+  - name: Start Node.js app with PM2 (cluster mode)
+    command: pm2 start app.js --name node_app --env production -i {{ node_instances }}
     args:
       chdir: /opt/node_app
+    become_user: ec2-user
+    environment:
+      NODE_ENV: production
+      PORT: "{{ node_port }}"
+      DATABASE_HOST: "{{ db_host }}"
+      DATABASE_PORT: "{{ db_port }}"
+      DATABASE_NAME: "{{ db_name }}"
+      DATABASE_USER: "{{ db_user }}"
+      DATABASE_PASSWORD: "{{ db_password }}"
     when: node_artifact != ""
 
   - name: Save PM2 process list (for reboot persistence)
     command: pm2 save
+    become_user: ec2-user
     when: node_artifact != ""
 
   - name: Generate PM2 startup script
     command: pm2 startup systemd -u ec2-user --hp /home/ec2-user
+    register: pm2_startup_command
+    become_user: ec2-user
     when: node_artifact != ""
+
+  - name: Execute PM2 startup script
+    shell: "{{ pm2_startup_command.stdout_lines[-1] }}"
+    when:
+    - node_artifact != ""
+    - pm2_startup_command.stdout_lines is defined
+    - pm2_startup_command.stdout_lines | length > 0
+
+  post_tasks:
+  # ------------------ Verification ------------------
+  - name: Wait for Flask app to start
+    wait_for:
+      port: "{{ flask_port }}"
+      host: 127.0.0.1
+      delay: 5
+      timeout: 60
+    when: flask_artifact != ""
+
+  - name: Wait for Node.js app to start
+    wait_for:
+      port: "{{ node_port }}"
+      host: 127.0.0.1
+      delay: 10
+      timeout: 60
+    when: node_artifact != ""
+
+  - name: Test Flask application
+    uri:
+      url: "http://127.0.0.1:{{ flask_port }}"
+      method: GET
+      return_content: true
+    register: flask_test
+    when: flask_artifact != ""
+    ignore_errors: true
+
+  - name: Test Node.js application
+    uri:
+      url: "http://127.0.0.1:{{ node_port }}"
+      method: GET
+      return_content: true
+    register: node_test
+    when: node_artifact != ""
+    ignore_errors: true
+
+  - name: Display deployment results
+    debug:
+      msg:
+      - "🎉 Deployment Summary:"
+      - ""
+      - "📊 Services Status:"
+      - "PostgreSQL: ✅ Database '{{ db_name }}' ready"
+      - "Flask: {{ '✅ Running on port ' + flask_port|string if flask_artifact != '' else '⏭️ Skipped (no artifact)' }}"
+      - "Node.js: {{ '✅ Running on port ' + node_port|string + ' with PM2' if node_artifact != '' else '⏭️ Skipped (no artifact)' }}"
+      - ""
+      - "🌐 Access URLs:"
+      - "{{ 'Flask: http://' + ansible_default_ipv4.address + ':' + flask_port|string if flask_artifact != '' else '' }}"
+      - "{{ 'Node.js: http://' + ansible_default_ipv4.address + ':' + node_port|string if node_artifact != '' else '' }}"
+      - ""
+      - "🔧 Management Commands:"
+      - "{{ 'Flask: sudo systemctl start/stop/restart flask_app.service' if flask_artifact != '' else '' }}"
+      - "{{ 'Node.js: pm2 start/stop/restart node_app (as ec2-user)' if node_artifact != '' else '' }}"
