@@ -1,11 +1,11 @@
 ---
 
-- name: Enable PostgreSQL 15 extras
-  command: amazon-linux-extras enable postgresql15
+- name: Enable PostgreSQL 15 module
+  command: dnf module enable postgresql:15 -y
   become: true
 
 - name: Install PostgreSQL
-  yum:
+  dnf:
     name:
     - postgresql-server
     - postgresql-contrib
@@ -13,10 +13,10 @@
     state: present
   become: true
 
-- name: Initialize PostgreSQL
-  command: postgresql-setup initdb
+- name: Initialize PostgreSQL database
+  command: /usr/bin/postgresql-setup --initdb --unit postgresql
   args:
-    creates: /var/lib/pgsql/data/PG_VERSION
+    creates: /var/lib/pgsql/data/postgresql.conf
   become: true
 
 - name: Enable and start PostgreSQL
