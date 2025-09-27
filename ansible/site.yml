@@ -7,7 +7,7 @@
     db_port: 5432
     db_name: "mydb"
     db_user: "myuser"
-    db_password: "mypassword"
+    db_password: "mypassword123"
   roles:
   - flask
   - nodejs
