@@ -1,4 +1,9 @@
 ---
+
+- name: Enable PostgreSQL 15 extras
+  command: amazon-linux-extras enable postgresql15
+  become: true
+
 - name: Install PostgreSQL
   yum:
     name:
@@ -6,17 +11,20 @@
     - postgresql-contrib
     - python3-psycopg2
     state: present
+  become: true
 
 - name: Initialize PostgreSQL
   command: postgresql-setup initdb
   args:
     creates: /var/lib/pgsql/data/PG_VERSION
+  become: true
 
 - name: Enable and start PostgreSQL
   service:
     name: postgresql
     state: started
-    enabled: yes
+    enabled: true
+  become: true
 
 - name: Create database user
   become_user: postgres
@@ -24,17 +32,20 @@
     name: "{{ db_user }}"
     password: "{{ db_password }}"
     role_attr_flags: CREATEDB,LOGIN
+  become: true
 
 - name: Create application database
   become_user: postgres
   postgresql_db:
     name: "{{ db_name }}"
     owner: "{{ db_user }}"
+  become: true
 
 - name: Copy init.sql to server
   copy:
     src: ../db/init.sql
     dest: /tmp/init.sql
+  become: true
 
 - name: Run init.sql
   become_user: postgres
