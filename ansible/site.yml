@@ -1,0 +1,115 @@
+- hosts: yum-server
+  become: true
+  vars:
+    flask_artifact: ""
+    node_artifact: ""
+    db_host: "localhost"
+    db_port: 5432
+    db_name: "mydb"
+    db_user: "myuser"
+    db_password: "mypassword"
+  roles:
+  - flask
+  - nodejs
+  - postgres
+
+  tasks:
+  # ------------------ Flask App ------------------
+  - name: Copy Flask artifact to server
+    copy:
+      src: "{{ flask_artifact }}"
+      dest: /opt/apps/
+    when: flask_artifact != ""
+
+  - name: Extract Flask app
+    unarchive:
+      src: "/opt/apps/{{ flask_artifact | basename }}"
+      dest: /opt/flask_app
+      remote_src: yes
+    when: flask_artifact != ""
+
+  - name: Create Flask .env file
+    copy:
+      dest: /opt/flask_app/.env
+      content: |
+        DATABASE_HOST={{ db_host }}
+        DATABASE_PORT={{ db_port }}
+        DATABASE_NAME={{ db_name }}
+        DATABASE_USER={{ db_user }}
+        DATABASE_PASSWORD={{ db_password }}
+    when: flask_artifact != ""
+
+  - name: Create systemd service for Flask app
+    copy:
+      dest: /etc/systemd/system/flask_app.service
+      content: |
+        [Unit]
+        Description=Flask Application
+        After=network.target
+
+        [Service]
+        WorkingDirectory=/opt/flask_app
+        ExecStart=/usr/bin/python3 /opt/flask_app/app.py
+        EnvironmentFile=/opt/flask_app/.env
+        Restart=always
+        User=ec2-user
+
+        [Install]
+        WantedBy=multi-user.target
+    when: flask_artifact != ""
+
+  - name: Reload systemd
+    command: systemctl daemon-reexec
+    when: flask_artifact != ""
+
+  - name: Enable and start Flask app
+    systemd:
+      name: flask_app
+      state: started
+      enabled: yes
+    when: flask_artifact != ""
+
+  # ------------------ Node.js App ------------------
+  - name: Install PM2 globally
+    npm:
+      name: pm2
+      global: yes
+      state: present
+
+  - name: Copy Node.js artifact to server
+    copy:
+      src: "{{ node_artifact }}"
+      dest: /opt/apps/
+    when: node_artifact != ""
+
+  - name: Extract Node.js app
+    unarchive:
+      src: "/opt/apps/{{ node_artifact | basename }}"
+      dest: /opt/node_app
+      remote_src: yes
+    when: node_artifact != ""
+
+  - name: Create Node.js .env file
+    copy:
+      dest: /opt/node_app/.env
+      content: |
+        DATABASE_HOST={{ db_host }}
+        DATABASE_PORT={{ db_port }}
+        DATABASE_NAME={{ db_name }}
+        DATABASE_USER={{ db_user }}
+        DATABASE_PASSWORD={{ db_password }}
+    when: node_artifact != ""
+
+  - name: Start Node.js app with PM2
+    command: pm2 start /opt/node_app/app.js --name node_app --update-env
+    args:
+      chdir: /opt/node_app
+    when: node_artifact != ""
+
+  - name: Save PM2 process list (for reboot persistence)
+    command: pm2 save
+    when: node_artifact != ""
+
+  - name: Generate PM2 startup script
+    command: pm2 startup systemd -u ec2-user --hp /home/ec2-user
+    when: node_artifact != ""

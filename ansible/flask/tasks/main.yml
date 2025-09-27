@@ -1,1 +1,59 @@
-work
+---
+- name: Install Python and pip
+  yum:
+    name:
+    - python3
+    - python3-pip
+    state: present
+
+- name: Create Flask app directory
+  file:
+    path: /opt/apps/flask_app
+    state: directory
+    owner: ec2-user
+    group: ec2-user
+
+- name: Copy Flask app
+  copy:
+    src: ../../flask_app/
+    dest: /opt/apps/flask_app/
+
+- name: Install dependencies
+  pip:
+    requirements: /opt/apps/flask_app/requirements.txt
+    executable: pip3
+
+- name: Create .env file
+  copy:
+    dest: /opt/apps/flask_app/.env
+    content: |
+      DB_NAME={{ db_name }}
+      DB_USER={{ db_user }}
+      DB_PASSWORD={{ db_password }}
+      DB_HOST=localhost
+      FLASK_PORT={{ flask_port }}
+
+- name: Create systemd service
+  copy:
+    dest: /etc/systemd/system/flask_app.service
+    content: |
+      [Unit]
+      Description=Flask Application
+      After=network.target
+
+      [Service]
+      User=ec2-user
+      WorkingDirectory=/opt/apps/flask_app
+      EnvironmentFile=/opt/apps/flask_app/.env
+      ExecStart=/usr/bin/gunicorn -w 3 -b 0.0.0.0:{{ flask_port }} app:app
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Reload systemd and start Flask app
+  systemd:
+    name: flask_app
+    enabled: yes
+    state: restarted
+    daemon_reload: yes
