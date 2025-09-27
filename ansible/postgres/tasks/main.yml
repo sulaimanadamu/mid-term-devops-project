@@ -1,62 +1,59 @@
 ---
+# Assumes 'dnf' is the package manager (correct for Amazon Linux 2023)
 
-- name: Install PostgreSQL 15
-  dnf:
+- name: Install PostgreSQL 15 packages
+  ansible.builtin.dnf:
     name:
-    - postgresql15
     - postgresql15-server
     - postgresql15-contrib
-    - python3-psycopg2
+    - python3-psycopg2 # Required for the postgresql_user/db modules
     state: present
   become: true
 
-- name: Initialize PostgreSQL database
-  command: /usr/bin/postgresql-15-setup initdb
-  args:
-    creates: /var/lib/pgsql/15/data/postgresql.conf
+- name: Initialize PostgreSQL database cluster
+  # On Amazon Linux 2023, the command is 'postgresql-setup --initdb'
+  # The path to the script is typically in the PATH after installing postgresql15-server.
+  ansible.builtin.command:
+    cmd: postgresql-setup --initdb
+    # This checks for the existence of the main config file, making the task idempotent.
+    creates: /var/lib/pgsql/data/postgresql.conf
   become: true
 
-- name: Enable and start PostgreSQL
-  service:
-    name: postgresql-15
-    state: started
-    enabled: true
-  become: true
-
-# - name: Initialize PostgreSQL database
-#   command: /usr/bin/postgresql-setup --initdb --unit postgresql
-#   args:
-#     creates: /var/lib/pgsql/data/postgresql.conf
-#   become: true
-
-- name: Enable and start PostgreSQL
-  service:
+- name: Enable and start PostgreSQL service
+  # For AL2023, the systemd service name is usually 'postgresql'
+  # The postgresql-15 service name is typically used on RHEL/CentOS systems using the PGDG repo.
+  ansible.builtin.service:
     name: postgresql
     state: started
     enabled: true
   become: true
 
-- name: Create database user
-  become_user: postgres
-  postgresql_user:
+# --- Database Configuration Tasks ---
+
+- name: Create database user ({{ db_user }})
+  ansible.builtin.postgresql_user:
     name: "{{ db_user }}"
     password: "{{ db_password }}"
     role_attr_flags: CREATEDB,LOGIN
   become: true
-
-- name: Create application database
   become_user: postgres
-  postgresql_db:
+
+- name: Create application database ({{ db_name }})
+  ansible.builtin.postgresql_db:
     name: "{{ db_name }}"
     owner: "{{ db_user }}"
   become: true
+  become_user: postgres
 
 - name: Copy init.sql to server
-  copy:
+  ansible.builtin.copy:
     src: ../db/init.sql
     dest: /tmp/init.sql
+    mode: '0644'
   become: true
 
-- name: Run init.sql
+- name: Run init.sql to populate the database
+  ansible.builtin.shell: "psql -d {{ db_name }} -f /tmp/init.sql"
+  become: true
   become_user: postgres
-  command: psql -d {{ db_name }} -f /tmp/init.sql
+  # Use 'shell' instead of 'command' for better execution context, although 'command' can work here.
