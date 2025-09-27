@@ -36,12 +36,6 @@
     - /opt/flask_app
     - /opt/node_app
 
-  - name: Install PM2 globally (before nodejs role)
-    npm:
-      name: pm2
-      global: true
-      state: present
-
   roles:
   - postgres # Sets up PostgreSQL database
   - flask # Handles Flask deployment (if flask_artifact provided)
