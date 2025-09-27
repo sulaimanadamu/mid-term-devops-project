@@ -1,23 +1,33 @@
 ---
 
-- name: Enable PostgreSQL 15 module
-  command: dnf module enable postgresql:15 -y
-  become: true
-
-- name: Install PostgreSQL
+- name: Install PostgreSQL 15
   dnf:
     name:
-    - postgresql-server
-    - postgresql-contrib
+    - postgresql15
+    - postgresql15-server
+    - postgresql15-contrib
     - python3-psycopg2
     state: present
   become: true
 
 - name: Initialize PostgreSQL database
-  command: /usr/bin/postgresql-setup --initdb --unit postgresql
+  command: /usr/bin/postgresql-15-setup initdb
   args:
-    creates: /var/lib/pgsql/data/postgresql.conf
+    creates: /var/lib/pgsql/15/data/postgresql.conf
   become: true
+
+- name: Enable and start PostgreSQL
+  service:
+    name: postgresql-15
+    state: started
+    enabled: true
+  become: true
+
+# - name: Initialize PostgreSQL database
+#   command: /usr/bin/postgresql-setup --initdb --unit postgresql
+#   args:
+#     creates: /var/lib/pgsql/data/postgresql.conf
+#   become: true
 
 - name: Enable and start PostgreSQL
   service:
