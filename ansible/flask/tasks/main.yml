@@ -88,7 +88,7 @@
 
       [Install]
       WantedBy=multi-user.target
-    when: flask_artifact != ""
+  when: flask_artifact != ""
   become: true
 
 - name: Reload systemd, enable, and start Flask app
