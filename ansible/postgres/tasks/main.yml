@@ -1,6 +1,29 @@
 ---
 # tasks/main.yml (postgres role)
 
+# --- PostgreSQL Cleanup (force reinstall) ---
+- name: Stop PostgreSQL service if running
+  ansible.builtin.systemd:
+    name: postgresql
+    state: stopped
+  ignore_errors: true
+  become: true
+
+- name: Remove old PostgreSQL packages
+  ansible.builtin.dnf:
+    name:
+    - postgresql15-server
+    - postgresql15-contrib
+    - python3-psycopg2
+    state: absent
+  become: true
+
+- name: Remove PostgreSQL data directory
+  ansible.builtin.file:
+    path: "{{ pg_data_dir }}"
+    state: absent
+  become: true
+
 - name: Load role defaults (ensure variables exist)
   ansible.builtin.set_fact:
     pg_version: "{{ pg_version | default('15') }}"
@@ -132,19 +155,19 @@
 
 # If service start failed, capture status + journal for debugging (useful in Jenkins logs)
 - block:
-    - name: Capture systemctl status for {{ pg_service_name }}
-      ansible.builtin.command: "systemctl status {{ pg_service_name }} -l --no-pager"
-      register: pg_status
-      failed_when: false
-    - name: Capture journalctl for {{ pg_service_name }}
-      ansible.builtin.command: "journalctl -xeu {{ pg_service_name }} --no-pager -n 200"
-      register: pg_journal
-      failed_when: false
+  - name: Capture systemctl status for {{ pg_service_name }}
+    ansible.builtin.command: "systemctl status {{ pg_service_name }} -l --no-pager"
+    register: pg_status
+    failed_when: false
+  - name: Capture journalctl for {{ pg_service_name }}
+    ansible.builtin.command: "journalctl -xeu {{ pg_service_name }} --no-pager -n 200"
+    register: pg_journal
+    failed_when: false
   when: pg_service_result is failed
   become: true
 
 - name: Debug captured PostgreSQL status/journal (if start failed)
   ansible.builtin.debug:
     msg:
-      - "=== systemctl status ==="
-      - "{{ pg_status.stdout_lines | default([]) }}"
+    - "=== systemctl status ==="
+    - "{{ pg_status.stdout_lines | default([]) }}"
