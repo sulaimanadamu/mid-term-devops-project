@@ -48,13 +48,6 @@
 
   post_tasks:
   # ------------------ Verification ------------------
-  - name: Wait for Flask app to start
-    wait_for:
-      port: "{{ flask_port }}"
-      host: 127.0.0.1
-      delay: 5
-      timeout: 60
-    when: flask_artifact != ""
 
   - name: Wait for Node.js app to start
     wait_for:
@@ -64,14 +57,13 @@
       timeout: 60
     when: node_artifact != ""
 
-  - name: Test Flask application
-    uri:
-      url: "http://127.0.0.1:{{ flask_port }}"
-      method: GET
-      return_content: true
-    register: flask_test
+  - name: Wait for Flask app to start
+    wait_for:
+      port: "{{ flask_port }}"
+      host: 127.0.0.1
+      delay: 5
+      timeout: 60
     when: flask_artifact != ""
-    ignore_errors: true
 
   - name: Test Node.js application
     uri:
@@ -80,6 +72,15 @@
       return_content: true
     register: node_test
     when: node_artifact != ""
+    ignore_errors: true
+
+  - name: Test Flask application
+    uri:
+      url: "http://127.0.0.1:{{ flask_port }}"
+      method: GET
+      return_content: true
+    register: flask_test
+    when: flask_artifact != ""
     ignore_errors: true
 
   - name: Display deployment results
