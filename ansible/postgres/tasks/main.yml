@@ -52,7 +52,6 @@
   become: true
   notify: Restart PostgreSQL
 # -----------------------------------------------------------------------------------------
-# The duplicate task has been removed from here.
 
 - name: Set PostgreSQL to listen on localhost (CRITICAL LISTEN FIX)
   ansible.builtin.lineinfile:
@@ -64,6 +63,18 @@
     backup: yes
   become: true
   notify: Restart PostgreSQL
+
+# ------------------ ULTIMATE FIX: Shared Memory Limits (ADDED) ------------------
+- name: Set kernel parameters for PostgreSQL shared memory (ULIMATE FIX)
+  ansible.posix.sysctl:
+    name: 'kernel.shmmax'
+    value: '68719476736' # Set a safe high value (64GB)
+    state: present
+    sysctl_file: /etc/sysctl.d/99-postgresql.conf
+    reload: true
+  become: true
+  notify: Restart PostgreSQL # Trigger handler to ensure new limits are used
+# --------------------------------------------------------------------------------
 
 - name: Enable and start PostgreSQL service (AL2023 Standard Service Name)
   ansible.builtin.systemd:
@@ -95,4 +106,3 @@
   ansible.builtin.shell: "psql -d postgres -f /tmp/init.sql"
   become: true
   become_user: postgres
-...
