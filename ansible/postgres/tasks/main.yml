@@ -1,7 +1,4 @@
 ---
-
-
----
 # Assumes 'dnf' is the package manager (correct for Amazon Linux 2023)
 
 - name: Install PostgreSQL 15 packages
