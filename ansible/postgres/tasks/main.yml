@@ -16,14 +16,16 @@
     creates: /var/lib/pgsql/data/postgresql.conf
   become: true
 
-# ----------------- CRITICAL FIX: Simplified 'line' to prevent restart failure -----------------
-- name: Set PostgreSQL to use MD5 password authentication for local connections
+# ----------------- CRITICAL FIX: Inserting a robust line for MD5 authentication -----------------
+# This replaces the old, problematic regexp/lineinfile task.
+- name: Set PostgreSQL to use MD5 password authentication for local connections (Robust Insert)
   ansible.builtin.lineinfile:
     path: /var/lib/pgsql/data/pg_hba.conf
-    # Targets the default IPv4 local connection line and replaces 'ident' or 'peer' with 'md5'.
-    regexp: '^host\s+all\s+all\s+127\.0\.0\.1\/32\s+(ident|peer)$'
-    # Use simple spacing for reliability (Fixes the service restart issue)
+    # Insert the host line just before the default local connection rules start.
+    # This is a highly stable location for a custom rule.
+    insertbefore: "^host\\s+all\\s+all\\s+127\\.0\\.0\\.1\\/32\\s+(ident|peer)$"
     line: 'host all all 127.0.0.1/32 md5'
+    state: present
     backup: yes
   become: true
   notify: Restart PostgreSQL
@@ -61,4 +63,3 @@
   ansible.builtin.shell: "psql -d postgres -f /tmp/init.sql"
   become: true
   become_user: postgres
-...
