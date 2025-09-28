@@ -2,13 +2,16 @@ const express = require('express');
 const { Pool } = require('pg');
 const app = express();
 
+// Use environment variables set by Ansible/PM2
 const pool = new Pool({
-  host: 'localhost',
-  user: 'devops',
-  password: 'password',
-  database: 'sharedappdb'
+  host: process.env.DATABASE_HOST || 'localhost',
+  user: process.env.DATABASE_USER || 'devops',
+  password: process.env.DATABASE_PASSWORD || 'password',
+  database: process.env.DATABASE_NAME || 'sharedappdb',
+  port: process.env.DATABASE_PORT || 5432
 });
 
+// ... (rest of your app logic)
 app.get('/', async (req, res) => {
   const result = await pool.query('SELECT name FROM devs');
   const names = result.rows.map(row => `<li>${row.name}</li>`).join('');
