@@ -45,8 +45,9 @@
   ignore_errors: true
   when: node_artifact != ""
 
-- name: Start Node.js app with PM2 (cluster mode)
-  command: pm2 start index.js --name node_app --env production -i {{ node_instances }} -f # <-- FINAL FIX: Uses index.js and -f
+- name: Start Node.js app with PM2 (fork mode)
+  # REMOVED: -i {{ node_instances }} to switch from cluster mode (crashed with EADDRINUSE) to fork mode
+  command: pm2 start index.js --name node_app --env production -f
   args:
     chdir: /opt/apps/node_app
   become_user: ec2-user

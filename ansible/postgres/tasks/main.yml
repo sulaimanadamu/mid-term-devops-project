@@ -23,7 +23,7 @@
     # The regex targets the default IPv4 local connection line (127.0.0.1/32)
     # and replaces 'ident' with 'md5'.
     regexp: '^host\s+all\s+all\s+127\.0\.0\.1\/32\s+ident$'
-    line: 'host    all             all             127.0.0.1/32            md5'
+    line: 'host    all             all             127.0.0.1/32            md5'
     backup: yes
   become: true
   notify: Restart PostgreSQL
@@ -35,7 +35,7 @@
     state: started
     enabled: true
   become: true
-# ... (rest of your tasks continue here)
+
 # --- Database Configuration Tasks ---
 
 - name: Create database user ({{ db_user }})
@@ -46,12 +46,13 @@
   become: true
   become_user: postgres
 
-- name: Create application database ({{ db_name }})
-  ansible.builtin.postgresql_db:
-    name: "{{ db_name }}"
-    owner: "{{ db_user }}"
-  become: true
-  become_user: postgres
+# --- TASK REMOVED: init.sql will now handle database creation ---
+# - name: Create application database ({{ db_name }})
+#   ansible.builtin.postgresql_db:
+#     name: "{{ db_name }}"
+#     owner: "{{ db_user }}"
+#     become: true
+#     become_user: postgres
 
 - name: Copy init.sql to server
   ansible.builtin.copy:
@@ -61,7 +62,9 @@
   become: true
 
 - name: Run init.sql to populate the database
-  ansible.builtin.shell: "psql -d {{ db_name }} -f /tmp/init.sql"
+  # CRITICAL FIX: Run against the 'postgres' default database, 
+  # which allows the script to run 'CREATE DATABASE' and '\c' commands.
+  ansible.builtin.shell: "psql -d postgres -f /tmp/init.sql"
   become: true
   become_user: postgres
-  # Use 'shell' instead of 'command' for better execution context, although 'command' can work here.
+...
