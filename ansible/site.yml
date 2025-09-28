@@ -42,10 +42,11 @@
   - nodejs # Handles Node.js deployment (if node_artifact provided)
 
   tasks:
+
   # ------------------ Flask App Deployment ------------------
   - name: Copy Flask artifact to server
     copy:
-      src: "{{ flask_artifact }}"
+      src: "../{{ flask_artifact }}" # <-- FIXED: Added ../ to navigate up to the workspace root
       dest: "{{ app_directory }}/"
       owner: ec2-user
       group: ec2-user
