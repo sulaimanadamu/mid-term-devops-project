@@ -1,0 +1,30 @@
+---
+# defaults for postgres role - override these from playbook/group_vars/host_vars or CLI
+
+pg_version: "15"
+pg_packages:
+- "postgresql{{ pg_version }}-server"
+- "postgresql{{ pg_version }}-contrib"
+- python3-psycopg2
+
+# preferred init command — can be left as the generic wrapper on AL2023,
+# or set to a full path if needed (e.g. /usr/pgsql-15/bin/postgresql-15-setup initdb)
+pg_initdb_cmd: "postgresql-setup --initdb"
+
+# guessed data dirs; role will autodetect which exists and set pg_data_dir accordingly
+pg_data_dir_guess1: "/var/lib/pgsql/{{ pg_version }}/data"
+pg_data_dir_guess2: "/var/lib/pgsql/data"
+
+# DB credentials & name (override before production!)
+db_name: "sharedappdb"
+db_user: "shareduser"
+db_password: "ChangeMe123!"
+
+# listen address and kernel setting
+listen_addresses: "localhost"
+shmmax: "68719476736"
+
+# control whether init.sql is copied and executed
+init_sql: true
+init_sql_src: "../db/init.sql"
+init_sql_dest: "/tmp/init.sql"

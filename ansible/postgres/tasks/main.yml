@@ -1,36 +1,150 @@
 ---
-# tasks/main.yml for PostgreSQL role
+# tasks/main.yml (postgres role)
 
-- name: Install PostgreSQL 15 packages
-  yum:
-    name:
-    - postgresql15
-    - postgresql15-server
-    - postgresql15-contrib
+- name: Load role defaults (ensure variables exist)
+  ansible.builtin.set_fact:
+    pg_version: "{{ pg_version | default('15') }}"
+    pg_packages: "{{ pg_packages | default(['postgresql' + pg_version + '-server','postgresql' + pg_version + '-contrib','python3-psycopg2']) }}"
+    pg_initdb_cmd: "{{ pg_initdb_cmd | default('postgresql-setup --initdb') }}"
+    pg_data_dir_guess1: "{{ pg_data_dir_guess1 | default('/var/lib/pgsql/' + pg_version + '/data') }}"
+    pg_data_dir_guess2: "{{ pg_data_dir_guess2 | default('/var/lib/pgsql/data') }}"
+    db_name: "{{ db_name | default('sharedappdb') }}"
+    db_user: "{{ db_user | default('shareduser') }}"
+    db_password: "{{ db_password | default('ChangeMe123!') }}"
+    listen_addresses: "{{ listen_addresses | default('localhost') }}"
+    shmmax: "{{ shmmax | default('68719476736') }}"
+    init_sql: "{{ init_sql | default(true) }}"
+    init_sql_src: "{{ init_sql_src | default('../db/init.sql') }}"
+    init_sql_dest: "{{ init_sql_dest | default('/tmp/init.sql') }}"
+  become: true
+
+- name: Install PostgreSQL packages
+  ansible.builtin.package:
+    name: "{{ pg_packages }}"
     state: present
+  become: true
 
-- name: Initialize PostgreSQL 15 database cluster (idempotent)
-  command: postgresql-setup --initdb
-  args:
-    creates: /var/lib/pgsql/data/PG_VERSION
+# Detect which data dir is present (versioned vs legacy)
+- name: Check for versioned data dir ({{ pg_data_dir_guess1 }})
+  ansible.builtin.stat:
+    path: "{{ pg_data_dir_guess1 }}/postgresql.conf"
+  register: stat_versioned
+  become: true
+
+- name: Check for legacy data dir ({{ pg_data_dir_guess2 }})
+  ansible.builtin.stat:
+    path: "{{ pg_data_dir_guess2 }}/postgresql.conf"
+  register: stat_legacy
+  become: true
+
+- name: Set pg_data_dir based on discovered paths (defaults to versioned path)
+  ansible.builtin.set_fact:
+    pg_data_dir: >-
+      {{ pg_data_dir_guess1 if stat_versioned.stat.exists else
+         (pg_data_dir_guess2 if stat_legacy.stat.exists else pg_data_dir_guess1) }}
+  become: true
+
+- name: Initialize PostgreSQL database cluster (idempotent)
+  ansible.builtin.command:
+    cmd: "{{ pg_initdb_cmd }}"
+    creates: "{{ pg_data_dir }}/PG_VERSION"
+  become: true
 
 - name: Ensure PostgreSQL data directory has proper ownership
-  file:
-    path: /var/lib/pgsql/data
+  ansible.builtin.file:
+    path: "{{ pg_data_dir }}"
     owner: postgres
     group: postgres
-    state: directory
     recurse: yes
+  become: true
 
-- name: Set PostgreSQL to listen on localhost (CRITICAL LISTEN FIX)
-  lineinfile:
-    path: /var/lib/pgsql/data/postgresql.conf
-    regexp: '^#?listen_addresses =.*'
-    line: "listen_addresses = 'localhost'"
+- name: Restore SELinux context on PostgreSQL data dir (no-op on non-SELinux)
+  ansible.builtin.command:
+    cmd: "restorecon -R {{ pg_data_dir }}"
+  become: true
+  ignore_errors: true
+
+- name: Remove duplicate host entries for 127.0.0.1 in pg_hba.conf
+  ansible.builtin.lineinfile:
+    path: "{{ pg_data_dir }}/pg_hba.conf"
+    regexp: '^host\s+all\s+all\s+127\.0\.0\.1\/32\s+[^#]*$'
+    state: absent
+  become: true
+  notify: Restart PostgreSQL
+
+- name: Ensure local IPv4 connections use md5 authentication
+  ansible.builtin.lineinfile:
+    path: "{{ pg_data_dir }}/pg_hba.conf"
+    regexp: '^host\s+all\s+all\s+127\.0\.0\.1\/32\s+(ident|peer|md5)$'
+    line: 'host all all 127.0.0.1/32 md5'
+    create: yes
+    backup: yes
+  become: true
+  notify: Restart PostgreSQL
+
+- name: Ensure listen_addresses is configured
+  ansible.builtin.lineinfile:
+    path: "{{ pg_data_dir }}/postgresql.conf"
+    regexp: '^#?listen_addresses\s*='
+    line: "listen_addresses = '{{ listen_addresses }}'"
+    backup: yes
+  become: true
+  notify: Restart PostgreSQL
+
+- name: Set kernel.shmmax for PostgreSQL
+  ansible.posix.sysctl:
+    name: kernel.shmmax
+    value: "{{ shmmax }}"
     state: present
+    sysctl_file: /etc/sysctl.d/99-postgresql.conf
+    reload: yes
+  become: true
+  notify: Restart PostgreSQL
 
-- name: Enable and start PostgreSQL service (AL2023 Standard Service Name)
-  systemd:
-    name: postgresql
-    enabled: yes
+# Service unit detection: prefer versioned unit, fall back to generic
+- name: Check for versioned PostgreSQL service unit (postgresql-{{ pg_version }}.service)
+  ansible.builtin.shell: "systemctl list-unit-files | grep -q '^postgresql-{{ pg_version }}\\.service'"
+  register: pg_ver_service_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Check for generic PostgreSQL service unit (postgresql.service)
+  ansible.builtin.shell: "systemctl list-unit-files | grep -q '^postgresql\\.service'"
+  register: pg_generic_service_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Set pg_service_name based on discovery
+  ansible.builtin.set_fact:
+    pg_service_name: >-
+      {{ 'postgresql-' + pg_version if pg_ver_service_check.rc == 0 else
+         ('postgresql' if pg_generic_service_check.rc == 0 else 'postgresql') }}
+  become: true
+
+- name: Enable and start PostgreSQL service (auto-detected)
+  ansible.builtin.systemd:
+    name: "{{ pg_service_name }}"
+    enabled: true
     state: started
+  register: pg_service_result
+  become: true
+  failed_when: pg_service_result is failed
+
+# If service start failed, capture status + journal for debugging (useful in Jenkins logs)
+- block:
+    - name: Capture systemctl status for {{ pg_service_name }}
+      ansible.builtin.command: "systemctl status {{ pg_service_name }} -l --no-pager"
+      register: pg_status
+      failed_when: false
+    - name: Capture journalctl for {{ pg_service_name }}
+      ansible.builtin.command: "journalctl -xeu {{ pg_service_name }} --no-pager -n 200"
+      register: pg_journal
+      failed_when: false
+  when: pg_service_result is failed
+  become: true
+
+- name: Debug captured PostgreSQL status/journal (if start failed)
+  ansible.builtin.debug:
+    msg:
+      - "=== systemctl status ==="
+      - "{{ pg_status.stdout_lines | default([]) }}"
