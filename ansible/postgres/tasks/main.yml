@@ -1,4 +1,7 @@
 ---
+
+
+---
 # Assumes 'dnf' is the package manager (correct for Amazon Linux 2023)
 
 - name: Install PostgreSQL 15 packages
@@ -11,23 +14,31 @@
   become: true
 
 - name: Initialize PostgreSQL database cluster
-  # On Amazon Linux 2023, the command is 'postgresql-setup --initdb'
-  # The path to the script is typically in the PATH after installing postgresql15-server.
   ansible.builtin.command:
     cmd: postgresql-setup --initdb
-    # This checks for the existence of the main config file, making the task idempotent.
     creates: /var/lib/pgsql/data/postgresql.conf
   become: true
 
+# ----------------- CRITICAL FIX ADDED HERE -----------------
+- name: Set PostgreSQL to use MD5 password authentication for local connections
+  ansible.builtin.lineinfile:
+    path: /var/lib/pgsql/data/pg_hba.conf
+    # The regex targets the default IPv4 local connection line (127.0.0.1/32)
+    # and replaces 'ident' with 'md5'.
+    regexp: '^host\s+all\s+all\s+127\.0\.0\.1\/32\s+ident$'
+    line: 'host    all             all             127.0.0.1/32            md5'
+    backup: yes
+  become: true
+  notify: Restart PostgreSQL
+# -----------------------------------------------------------
+
 - name: Enable and start PostgreSQL service
-  # For AL2023, the systemd service name is usually 'postgresql'
-  # The postgresql-15 service name is typically used on RHEL/CentOS systems using the PGDG repo.
   ansible.builtin.service:
     name: postgresql
     state: started
     enabled: true
   become: true
-
+# ... (rest of your tasks continue here)
 # --- Database Configuration Tasks ---
 
 - name: Create database user ({{ db_user }})
