@@ -26,22 +26,39 @@
     state: directory
   become: true
 
-- name: Configure MD5 authentication for local connections (ROBUST INSERT FIX)
+- name: Apply correct SELinux context to PostgreSQL data directory (FINAL CRITICAL FIX)
+  ansible.builtin.command:
+    cmd: restorecon -R /var/lib/pgsql/data
+  become: true
+
+# ------------------ CRITICAL FIX: Ensure pg_hba.conf is CLEAN and correct ------------------
+- name: Clean up duplicate/malformed entries for 127.0.0.1 in pg_hba.conf
   ansible.builtin.lineinfile:
-    # Use the standard data directory path
     path: /var/lib/pgsql/data/pg_hba.conf
-    # The robust 'host all all 127.0.0.1/32 md5' line
+    # This regex targets any existing line that was manually added or is a duplicate
+    regexp: '^host\s+all\s+all\s+127\.0\.0\.1\/32\s+[^#]*$'
+    state: absent
+  become: true
+  notify: Restart PostgreSQL
+
+- name: Set local IPv4 connections to use md5 authentication (REPLACES DEFAULT)
+  ansible.builtin.lineinfile:
+    path: /var/lib/pgsql/data/pg_hba.conf
+    # This specifically finds and replaces the default 'ident' or 'peer' entry with 'md5'
+    regexp: '^host\s+all\s+all\s+127\.0\.0\.1\/32\s+(ident|peer)$'
     line: 'host all all 127.0.0.1/32 md5'
-    insertbefore: "^host\\s+all\\s+all\\s+127\\.0\\.0\\.1\\/32\\s+(ident|peer)$"
     state: present
     backup: yes
   become: true
   notify: Restart PostgreSQL
+# -----------------------------------------------------------------------------------------
+# The duplicate task has been removed from here.
 
 - name: Set PostgreSQL to listen on localhost (CRITICAL LISTEN FIX)
   ansible.builtin.lineinfile:
     # Use the standard data directory path
     path: /var/lib/pgsql/data/postgresql.conf
+    # Uncomment/replace listen_addresses
     regexp: '^#?listen_addresses\s*=\s*.*$'
     line: "listen_addresses = 'localhost'"
     backup: yes
@@ -78,4 +95,4 @@
   ansible.builtin.shell: "psql -d postgres -f /tmp/init.sql"
   become: true
   become_user: postgres
-... 
+...
