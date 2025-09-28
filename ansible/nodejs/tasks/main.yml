@@ -1,81 +1,81 @@
---- 
-  # ------------------ Node.js App Deployment ------------------
-  - name: Copy Node.js artifact to server
-    copy:
-      src: "../{{ node_artifact }}" # <-- CRITICAL FIX: Added ../
-      dest: "{{ app_directory }}/"
-      owner: ec2-user
-      group: ec2-user
-    when: node_artifact != ""
+---
+# ------------------ Node.js App Deployment ------------------
+- name: Copy Node.js artifact to server
+  copy:
+    src: "../{{ node_artifact }}" # <-- CRITICAL FIX: Added ../
+    dest: "{{ app_directory }}/"
+    owner: ec2-user
+    group: ec2-user
+  when: node_artifact != ""
 
-  - name: Extract Node.js app
-    unarchive:
-      src: "{{ app_directory }}/{{ node_artifact | basename }}"
-      dest: /opt/apps/
-      remote_src: true
-      owner: ec2-user
-      group: ec2-user
-    when: node_artifact != ""
+- name: Extract Node.js app
+  unarchive:
+    src: "{{ app_directory }}/{{ node_artifact | basename }}"
+    dest: /opt/apps/
+    remote_src: true
+    owner: ec2-user
+    group: ec2-user
+  when: node_artifact != ""
 
-  - name: Install Node.js dependencies
-    npm:
-      path: /opt/apps/node_app
-    become_user: ec2-user
-    when: node_artifact != ""
+- name: Install Node.js dependencies
+  npm:
+    path: /opt/apps/node_app
+  become_user: ec2-user
+  when: node_artifact != ""
 
-  - name: Create Node.js .env file
-    copy:
-      dest: /opt/apps/node_app/.env
-      content: |
-        NODE_ENV=production
-        PORT={{ node_port }}
-        DATABASE_HOST={{ db_host }}
-        DATABASE_PORT={{ db_port }}
-        DATABASE_NAME={{ db_name }}
-        DATABASE_USER={{ db_user }}
-        DATABASE_PASSWORD={{ db_password }}
-      owner: ec2-user
-      group: ec2-user
-      mode: '0600'
-    when: node_artifact != ""
+- name: Create Node.js .env file
+  copy:
+    dest: /opt/apps/node_app/.env
+    content: |
+      NODE_ENV=production
+      PORT={{ node_port }}
+      DATABASE_HOST={{ db_host }}
+      DATABASE_PORT={{ db_port }}
+      DATABASE_NAME={{ db_name }}
+      DATABASE_USER={{ db_user }}
+      DATABASE_PASSWORD={{ db_password }}
+    owner: ec2-user
+    group: ec2-user
+    mode: '0600'
+  when: node_artifact != ""
 
-  - name: Stop existing PM2 processes
-    command: pm2 delete all
-    become_user: ec2-user
-    ignore_errors: true
-    when: node_artifact != ""
+- name: Stop existing PM2 processes
+  command: pm2 delete all
+  become_user: ec2-user
+  ignore_errors: true
+  when: node_artifact != ""
 
+- name: Start Node.js app with PM2 (cluster mode)
+  command: pm2 start index.js --name node_app --env production -i {{ node_instances }} -f # <-- FINAL FIX: Uses index.js and -f
+  args:
+    chdir: /opt/apps/node_app
+  become_user: ec2-user
+  environment:
+    NODE_ENV: production
+    PORT: "{{ node_port }}"
+    DATABASE_HOST: "{{ db_host }}"
+    DATABASE_PORT: "{{ db_port }}"
+    DATABASE_NAME: "{{ db_name }}"
+    DATABASE_USER: "{{ db_user }}"
+    DATABASE_PASSWORD: "{{ db_password }}"
+  when: node_artifact != ""
 
-  - name: Start Node.js app with PM2 (cluster mode)
-    command: pm2 start index.js --name node_app --env production -i {{ node_instances }} -f # <-- FINAL FIX: Uses index.js and -f
-    args:
-      chdir: /opt/apps/node_app
-    become_user: ec2-user
-    environment:
-      NODE_ENV: production
-      PORT: "{{ node_port }}"
-      DATABASE_HOST: "{{ db_host }}"
-      DATABASE_PORT: "{{ db_port }}"
-      DATABASE_NAME: "{{ db_name }}"
-      DATABASE_USER: "{{ db_user }}"
-      DATABASE_PASSWORD: "{{ db_password }}"
-    when: node_artifact != ""
+- name: Save PM2 process list (for reboot persistence)
+  command: pm2 save
+  become_user: ec2-user
+  when: node_artifact != ""
 
-  - name: Save PM2 process list (for reboot persistence)
-    command: pm2 save
-    become_user: ec2-user
-    when: node_artifact != ""
+- name: Generate PM2 startup script
+  command: pm2 startup systemd -u ec2-user --hp /home/ec2-user
+  register: pm2_startup_command
+  become_user: ec2-user
+  when: node_artifact != ""
+  ignore_errors: true # <-- CRITICAL FIX: Add this to ignore the non-zero exit code
 
-  - name: Generate PM2 startup script
-    command: pm2 startup systemd -u ec2-user --hp /home/ec2-user
-    register: pm2_startup_command
-    become_user: ec2-user
-    when: node_artifact != ""
-
-  - name: Execute PM2 startup script
-    shell: "{{ pm2_startup_command.stdout_lines[-1] }}"
-    when:
-    - node_artifact != ""
-    - pm2_startup_command.stdout_lines is defined
-    - pm2_startup_command.stdout_lines | length > 0
+- name: Execute PM2 startup script
+  shell: "{{ pm2_startup_command.stdout_lines[-1] }}"
+  when:
+  - node_artifact != ""
+  - pm2_startup_command.stdout_lines is defined
+  - pm2_startup_command.stdout_lines | length > 0
 ...
