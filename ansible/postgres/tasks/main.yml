@@ -1,12 +1,10 @@
 ---
-# Assumes 'dnf' is the package manager (correct for Amazon Linux 2023)
-
 - name: Install PostgreSQL 15 packages
   ansible.builtin.dnf:
     name:
     - postgresql15-server
     - postgresql15-contrib
-    - python3-psycopg2 # Required for the postgresql_user/db modules
+    - python3-psycopg2 
     state: present
   become: true
 
@@ -16,20 +14,24 @@
     creates: /var/lib/pgsql/data/postgresql.conf
   become: true
 
-# ----------------- CRITICAL FIX: Inserting a robust line for MD5 authentication -----------------
-# This replaces the old, problematic regexp/lineinfile task.
+- name: Set correct permissions and ownership for PostgreSQL data directory
+  ansible.builtin.file:
+    path: /var/lib/pgsql/data
+    owner: postgres
+    group: postgres
+    recurse: true
+    state: directory
+  become: true
+
 - name: Set PostgreSQL to use MD5 password authentication for local connections (Robust Insert)
   ansible.builtin.lineinfile:
     path: /var/lib/pgsql/data/pg_hba.conf
-    # Insert the host line just before the default local connection rules start.
-    # This is a highly stable location for a custom rule.
     insertbefore: "^host\\s+all\\s+all\\s+127\\.0\\.0\\.1\\/32\\s+(ident|peer)$"
     line: 'host all all 127.0.0.1/32 md5'
     state: present
     backup: yes
   become: true
   notify: Restart PostgreSQL
-# --------------------------------------------------------------------------------------------
 
 - name: Enable and start PostgreSQL service
   ansible.builtin.service:
@@ -48,8 +50,6 @@
   become: true
   become_user: postgres
 
-# --- TASK REMOVED: init.sql will now handle database creation ---
-
 - name: Copy init.sql to server
   ansible.builtin.copy:
     src: ../db/init.sql
@@ -58,8 +58,8 @@
   become: true
 
 - name: Run init.sql to populate the database
-  # CRITICAL FIX: Run against the 'postgres' default database 
-  # which allows the script to run 'CREATE DATABASE' and '\c' commands.
   ansible.builtin.shell: "psql -d postgres -f /tmp/init.sql"
   become: true
   become_user: postgres
+
+... 
