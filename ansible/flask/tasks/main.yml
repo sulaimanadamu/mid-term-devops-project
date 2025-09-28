@@ -64,24 +64,32 @@
     content: |
       [Unit]
       Description=Flask Application
-      # Temporarily remove explicit Postgres dependencies for testing startup
-      After=network.target postgresql.service # <--- RE-ADDED
+      After=network.target postgresql.service 
       Wants=postgresql.service 
 
       [Service]
       Type=simple
       User=ec2-user
-      WorkingDirectory=/opt/apps/flask_app
-      Environment=PATH=/usr/local/bin:/usr/bin:/bin
+      # This is where your app.py file lives
+      WorkingDirectory=/opt/apps/flask_app 
+
+      # IMPORTANT: Ensure ~/.local/bin is included, as pip installs go there.
+      Environment=PATH=/usr/local/bin:/usr/bin:/bin:/home/ec2-user/.local/bin
       EnvironmentFile=/opt/apps/flask_app/.env
-      # Ensure this command correctly executes gunicorn
-      ExecStart=/usr/bin/python3 -m gunicorn --workers {{ flask_workers }} --bind 0.0.0.0:{{ flask_port }} app:app
+
+      # -----------------------------------------------------------------
+      # CRITICAL CHANGE: Run the app.py file directly with Python
+      # This assumes your main application file is named 'app.py'
+      ExecStart=/usr/bin/python3 app.py 
+      # -----------------------------------------------------------------
+
       Restart=always
       RestartSec=10
 
       [Install]
       WantedBy=multi-user.target
-  when: flask_artifact != ""
+    when: flask_artifact != ""
+  become: true
 
 - name: Reload systemd, enable, and start Flask app
   systemd:
