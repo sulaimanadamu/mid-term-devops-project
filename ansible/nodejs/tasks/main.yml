@@ -37,7 +37,13 @@
     path: /opt/apps/node_app
     state: present
 
-- name: Start Node.js app with PM2
-  command: pm2 start /opt/apps/node_app/app.js --name node_app --watch
+# - name: Start Node.js app with PM2
+#   command: pm2 start /opt/apps/node_app/app.js --name node_app --watch
+#   args:
+#     chdir: /opt/apps/node_app
+
+- name: Start Node.js app with PM2 (cluster mode)
+  command: pm2 start index.js --name node_app --env production -i {{ node_instances }} # <-- FIXED
   args:
     chdir: /opt/apps/node_app
+  # ... (rest of the task)
