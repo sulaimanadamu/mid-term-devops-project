@@ -132,7 +132,7 @@
   - name: Extract Node.js app
     unarchive:
       src: "{{ app_directory }}/{{ node_artifact | basename }}"
-      dest: /opt/node_app
+      dest: /opt/apps/
       remote_src: true
       owner: ec2-user
       group: ec2-user
@@ -140,13 +140,13 @@
 
   - name: Install Node.js dependencies
     npm:
-      path: /opt/node_app
+      path: /opt/apps/node_app
     become_user: ec2-user
     when: node_artifact != ""
 
   - name: Create Node.js .env file
     copy:
-      dest: /opt/node_app/.env
+      dest: /opt/apps/node_app/.env
       content: |
         NODE_ENV=production
         PORT={{ node_port }}
@@ -167,9 +167,9 @@
     when: node_artifact != ""
 
   - name: Start Node.js app with PM2 (cluster mode)
-    command: pm2 start app.js --name node_app --env production -i {{ node_instances }}
+    command: pm2 start index.js --name node_app --env production -i {{ node_instances }} # <-- FIXED: Changed 'app.js' to 'index.js'
     args:
-      chdir: /opt/node_app
+      chdir: /opt/apps/node_app
     become_user: ec2-user
     environment:
       NODE_ENV: production
@@ -252,3 +252,4 @@
       - " Management Commands:"
       - "{{ 'Flask: sudo systemctl start/stop/restart flask_app.service' if flask_artifact != '' else '' }}"
       - "{{ 'Node.js: pm2 start/stop/restart node_app (as ec2-user)' if node_artifact != '' else '' }}"
+...
