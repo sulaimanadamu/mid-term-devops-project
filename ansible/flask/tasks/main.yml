@@ -63,9 +63,8 @@
     content: |
       [Unit]
       Description=Flask Application
-      After=network.target postgresql.service
-      # Waits for PostgreSQL to be ready before starting
-      Wants=postgresql.service
+      # Temporarily remove explicit Postgres dependencies for testing startup
+      After=network.target
 
       [Service]
       Type=simple
@@ -73,7 +72,7 @@
       WorkingDirectory=/opt/apps/flask_app
       Environment=PATH=/usr/local/bin:/usr/bin:/bin
       EnvironmentFile=/opt/apps/flask_app/.env
-      # Use the specific gunicorn execution command from the environment
+      # Ensure this command correctly executes gunicorn
       ExecStart=/usr/bin/python3 -m gunicorn --workers {{ flask_workers }} --bind 0.0.0.0:{{ flask_port }} app:app
       Restart=always
       RestartSec=10
