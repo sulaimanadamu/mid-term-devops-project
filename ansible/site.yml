@@ -23,6 +23,17 @@
     node_instances: 2
 
   pre_tasks:
+  # ------------------ CRITICAL FIX: Kernel Limits (MOVED HERE to run BEFORE the role) ------------------
+  - name: Set kernel parameters for PostgreSQL shared memory (FINAL FIX)
+    ansible.posix.sysctl:
+      name: 'kernel.shmmax'
+      value: '68719476736' # 64GB (A safe high value for modern systems)
+      state: present
+      sysctl_file: /etc/sysctl.d/99-postgresql.conf
+      reload: true
+    become: true
+  # ----------------------------------------------------------------------------------------------------
+
   # Create application directories before roles run
   - name: Create application directories
     file:
@@ -33,21 +44,15 @@
       mode: '0755'
     loop:
     - /opt/apps
-    # NOTE: The directories /opt/flask_app and /opt/node_app are unnecessary
-    # and conflict with the extraction path. Only the base directory /opt/apps
-    # is needed, as the extracted content creates the subfolders.
-    # We will keep them commented out for clarity but remove them from the loop.
-    # - /opt/flask_app
-    # - /opt/node_app
 
   roles:
-  - postgres # Sets up PostgreSQL database
-  - flask # Handles Flask deployment (if flask_artifact provided)
-  - nodejs # Handles Node.js deployment (if node_artifact provided)
-  # tasks: # <-- This section is now correctly empty
+  - postgres # Now runs *after* the kernel limits are set
+  - flask
+  - nodejs
 
   post_tasks:
   # ------------------ Verification ------------------
+  # The sysctl task has been removed from here.
 
   - name: Wait for Node.js app to start
     wait_for:
@@ -89,7 +94,7 @@
       - " Deployment Summary:"
       - ""
       - " Services Status:"
-      - "PostgreSQL:  Database '{{ db_name }}' ready"
+      - "PostgreSQL:  Database '{{ db_name }}' ready"
       - "Flask: {{ ' Running on port ' + flask_port|string if flask_artifact != '' else ' Skipped (no artifact)' }}"
       - "Node.js: {{ ' Running on port ' + node_port|string + ' with PM2' if node_artifact != '' else ' Skipped (no artifact)' }}"
       - ""
@@ -100,3 +105,4 @@
       - " Management Commands:"
       - "{{ 'Flask: sudo systemctl start/stop/restart flask_app.service' if flask_artifact != '' else '' }}"
       - "{{ 'Node.js: pm2 start/stop/restart node_app (as ec2-user)' if node_artifact != '' else '' }}"
+...
