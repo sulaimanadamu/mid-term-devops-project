@@ -64,7 +64,8 @@
       [Unit]
       Description=Flask Application
       # Temporarily remove explicit Postgres dependencies for testing startup
-      After=network.target
+      After=network.target postgresql.service # <--- RE-ADDED
+      Wants=postgresql.service 
 
       [Service]
       Type=simple
