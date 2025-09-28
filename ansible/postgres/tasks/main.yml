@@ -4,18 +4,21 @@
     name:
     - postgresql15-server
     - postgresql15-contrib
-    - python3-psycopg2 
+    - python3-psycopg2
     state: present
   become: true
 
-- name: Initialize PostgreSQL database cluster
+- name: Initialize PostgreSQL 15 database cluster (AL2023 Standard Command)
   ansible.builtin.command:
+    # Use the standard wrapper command for the default AL2023 packages
     cmd: postgresql-setup --initdb
+    # Use the standard data directory path
     creates: /var/lib/pgsql/data/postgresql.conf
   become: true
 
-- name: Set correct permissions and ownership for PostgreSQL data directory
+- name: Set correct permissions for PostgreSQL data directory (CRITICAL FIX)
   ansible.builtin.file:
+    # Use the standard data directory path
     path: /var/lib/pgsql/data
     owner: postgres
     group: postgres
@@ -23,18 +26,31 @@
     state: directory
   become: true
 
-- name: Set PostgreSQL to use MD5 password authentication for local connections (Robust Insert)
+- name: Configure MD5 authentication for local connections (ROBUST INSERT FIX)
   ansible.builtin.lineinfile:
+    # Use the standard data directory path
     path: /var/lib/pgsql/data/pg_hba.conf
-    insertbefore: "^host\\s+all\\s+all\\s+127\\.0\\.0\\.1\\/32\\s+(ident|peer)$"
+    # The robust 'host all all 127.0.0.1/32 md5' line
     line: 'host all all 127.0.0.1/32 md5'
+    insertbefore: "^host\\s+all\\s+all\\s+127\\.0\\.0\\.1\\/32\\s+(ident|peer)$"
     state: present
     backup: yes
   become: true
   notify: Restart PostgreSQL
 
-- name: Enable and start PostgreSQL service
-  ansible.builtin.service:
+- name: Set PostgreSQL to listen on localhost (CRITICAL LISTEN FIX)
+  ansible.builtin.lineinfile:
+    # Use the standard data directory path
+    path: /var/lib/pgsql/data/postgresql.conf
+    regexp: '^#?listen_addresses\s*=\s*.*$'
+    line: "listen_addresses = 'localhost'"
+    backup: yes
+  become: true
+  notify: Restart PostgreSQL
+
+- name: Enable and start PostgreSQL service (AL2023 Standard Service Name)
+  ansible.builtin.systemd:
+    # Use the standard service name
     name: postgresql
     state: started
     enabled: true
@@ -43,7 +59,7 @@
 # --- Database Configuration Tasks ---
 
 - name: Create database user ({{ db_user }})
-  ansible.builtin.postgresql_user:
+  community.postgresql.postgresql_user:
     name: "{{ db_user }}"
     password: "{{ db_password }}"
     role_attr_flags: CREATEDB,LOGIN
@@ -58,8 +74,8 @@
   become: true
 
 - name: Run init.sql to populate the database
+  # Run against the 'postgres' database to ensure we can run CREATE DATABASE
   ansible.builtin.shell: "psql -d postgres -f /tmp/init.sql"
   become: true
   become_user: postgres
-
 ... 
