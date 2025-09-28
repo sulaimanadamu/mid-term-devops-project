@@ -10,82 +10,60 @@
 
 - name: Initialize PostgreSQL 15 database cluster (AL2023 Standard Command)
   ansible.builtin.command:
-    # Use the standard wrapper command for the default AL2023 packages
     cmd: postgresql-setup --initdb
-    # Use the standard data directory path
-    creates: /var/lib/pgsql/data/postgresql.conf
+    creates: /var/lib/pgsql/15/data/postgresql.conf
   become: true
 
-- name: Set correct permissions for PostgreSQL data directory (CRITICAL FIX)
+- name: Set correct permissions for PostgreSQL 15 data directory
   ansible.builtin.file:
-    # Use the standard data directory path
-    path: /var/lib/pgsql/data
+    path: /var/lib/pgsql/15/data
     owner: postgres
     group: postgres
     recurse: true
     state: directory
   become: true
 
-- name: Apply correct SELinux context to PostgreSQL data directory (FINAL CRITICAL FIX)
+- name: Apply SELinux context to PostgreSQL data directory
   ansible.builtin.command:
-    cmd: restorecon -R /var/lib/pgsql/data
+    cmd: restorecon -R /var/lib/pgsql/15/data
   become: true
 
-# ------------------ CRITICAL FIX: Ensure pg_hba.conf is CLEAN and correct ------------------
+# ------------------ Fix pg_hba.conf ------------------
 - name: Clean up duplicate/malformed entries for 127.0.0.1 in pg_hba.conf
   ansible.builtin.lineinfile:
-    path: /var/lib/pgsql/data/pg_hba.conf
-    # This regex targets any existing line that was manually added or is a duplicate
+    path: /var/lib/pgsql/15/data/pg_hba.conf
     regexp: '^host\s+all\s+all\s+127\.0\.0\.1\/32\s+[^#]*$'
     state: absent
   become: true
   notify: Restart PostgreSQL
 
-- name: Set local IPv4 connections to use md5 authentication (REPLACES DEFAULT)
+- name: Set local IPv4 connections to use md5 authentication
   ansible.builtin.lineinfile:
-    path: /var/lib/pgsql/data/pg_hba.conf
-    # This specifically finds and replaces the default 'ident' or 'peer' entry with 'md5'
+    path: /var/lib/pgsql/15/data/pg_hba.conf
     regexp: '^host\s+all\s+all\s+127\.0\.0\.1\/32\s+(ident|peer)$'
     line: 'host all all 127.0.0.1/32 md5'
     state: present
     backup: yes
   become: true
   notify: Restart PostgreSQL
-# -----------------------------------------------------------------------------------------
 
-- name: Set PostgreSQL to listen on localhost (CRITICAL LISTEN FIX)
+- name: Ensure PostgreSQL listens on localhost
   ansible.builtin.lineinfile:
-    # Use the standard data directory path
-    path: /var/lib/pgsql/data/postgresql.conf
-    # Uncomment/replace listen_addresses
+    path: /var/lib/pgsql/15/data/postgresql.conf
     regexp: '^#?listen_addresses\s*=\s*.*$'
     line: "listen_addresses = 'localhost'"
     backup: yes
   become: true
   notify: Restart PostgreSQL
 
-# ------------------ ULTIMATE FIX: Shared Memory Limits (ADDED) ------------------
-- name: Set kernel parameters for PostgreSQL shared memory (ULIMATE FIX)
-  ansible.posix.sysctl:
-    name: 'kernel.shmmax'
-    value: '68719476736' # Set a safe high value (64GB)
-    state: present
-    sysctl_file: /etc/sysctl.d/99-postgresql.conf
-    reload: true
-  become: true
-  notify: Restart PostgreSQL # Trigger handler to ensure new limits are used
-# --------------------------------------------------------------------------------
-
-- name: Enable and start PostgreSQL service (AL2023 Standard Service Name)
+- name: Enable and start PostgreSQL service
   ansible.builtin.systemd:
-    # Use the standard service name
     name: postgresql
     state: started
     enabled: true
   become: true
 
-# --- Database Configuration Tasks ---
-
+# --- Database Configuration ---
 - name: Create database user ({{ db_user }})
   community.postgresql.postgresql_user:
     name: "{{ db_user }}"
@@ -102,7 +80,6 @@
   become: true
 
 - name: Run init.sql to populate the database
-  # Run against the 'postgres' database to ensure we can run CREATE DATABASE
   ansible.builtin.shell: "psql -d postgres -f /tmp/init.sql"
   become: true
   become_user: postgres
